@@ -1,12 +1,14 @@
-'use client';
+ 'use client';
 
 import { useState, useEffect } from "react";
+import { io } from 'socket.io-client';
 
 type Card = {
     id: string;
     name: string;
     rarity: string;
     price: number;
+    listings?: number;
     lastUpdated: string;
     image: string;
 }
@@ -16,6 +18,7 @@ export default function TopCards() {
     const [cards, setCards] = useState<Card[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
+    const [asOf, setAsOf] = useState<string | null>(null);
 
     useEffect(() => {
 
@@ -24,11 +27,13 @@ export default function TopCards() {
                 
                 const res = await fetch('/api/pokemarket');
                 const json = await res.json();
-                
+
                 if (!res.ok) {
                     setError(json.error || 'Failed to load cards');
-                } else {
+                } else if (Array.isArray(json)) {
                     setCards(json);
+                } else if (json?.data && Array.isArray(json.data)) {
+                    setCards(json.data);
                 }
             } catch (err) {
                 setError('An error occured.');
@@ -38,6 +43,29 @@ export default function TopCards() {
         }
 
         fetchCards();
+
+        // Socket.IO for real-time updates
+        const socket = io();
+
+        socket.on('connect', () => {
+            socket.emit('subscribe-market');
+        });
+
+        socket.on('market-update', (data: any) => {
+            // payload may be { cards, updatedAt }
+            const cards = Array.isArray(data) ? data : (data?.cards || []);
+            const updatedAt = data?.updatedAt || null;
+            setCards(cards);
+            if (updatedAt) setAsOf(updatedAt);
+        });
+
+        socket.on('connect_error', (err) => {
+            console.warn('Socket connect error', err);
+        });
+
+        return () => {
+            socket.disconnect();
+        };
 
     }, []);
 
@@ -52,11 +80,10 @@ export default function TopCards() {
 
     const now = new Date();
 
-
     return (
         <div className="flex flex-col flex-1 justify-center items-center">
             <h1 className="text-3xl font-bold">Top 3 most expensive Pokémon TCG cards</h1>
-            <p className="mb-20">as of {now.toLocaleDateString()}</p>
+            <p className="mb-20">as of {asOf ? new Date(asOf).toLocaleString() : now.toLocaleDateString()}</p>
             <div className="flex justify-center items-center">
 
             {cards.map((card: Card) => (
